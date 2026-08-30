@@ -166,7 +166,11 @@ hud.overlay.addEventListener("click", async () => {
     await renderer.domElement.requestPointerLock();
   } catch {
     enterPlay();
+    return;
   }
+  window.setTimeout(() => {
+    if (screen === "pause" && !player.dead) enterPlay();
+  }, 120);
 });
 
 hud.death.addEventListener("click", async () => {
