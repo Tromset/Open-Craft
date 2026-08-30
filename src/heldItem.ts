@@ -3,9 +3,9 @@ import { ATLAS_COLS, ATLAS_ROWS, FACE_TILES, ITEM_TILES, type FaceTiles } from "
 import { createAtlas } from "./textures";
 
 /** Minecraft-style first-person offset (camera local space, bottom-right). */
-const BASE = { x: 0.46, y: -0.36, z: -0.68 };
-const CUBE_SCALE = 0.34;
-const SPRITE_SCALE = 0.48;
+const BASE = { x: 0.34, y: -0.24, z: -0.55 };
+const CUBE_SCALE = 0.36;
+const SPRITE_SCALE = 0.5;
 const CUBE_ROT = new THREE.Euler(0.32, Math.PI * 0.25, 0.12);
 const ITEM_ROT = new THREE.Euler(0.18, 0.55, 0.72);
 
@@ -70,7 +70,7 @@ export class HeldItem {
       map: tex,
       transparent: true,
       alphaTest: 0.05,
-      emissive: 0x3a3a3a,
+      emissive: 0x666666,
       side: THREE.DoubleSide,
     });
 
