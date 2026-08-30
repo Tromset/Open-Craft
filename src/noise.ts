@@ -82,3 +82,25 @@ export function fbm2(
   }
   return sum / norm;
 }
+
+export function fbm3(
+  x: number,
+  y: number,
+  z: number,
+  octaves = 3,
+  seed = 0,
+  lacunarity = 2,
+  gain = 0.5,
+): number {
+  let amp = 1;
+  let freq = 1;
+  let sum = 0;
+  let norm = 0;
+  for (let i = 0; i < octaves; i++) {
+    sum += noise3(x * freq, y * freq, z * freq, seed + i * 47) * amp;
+    norm += amp;
+    amp *= gain;
+    freq *= lacunarity;
+  }
+  return sum / norm;
+}
