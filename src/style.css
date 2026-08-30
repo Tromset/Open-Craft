@@ -255,6 +255,11 @@ canvas {
   border-color: rgba(255, 255, 255, 0.45);
 }
 
+.slot.selected,
+.slot.hot {
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
 .slot.selected {
   border-color: #fff;
   border-width: 3px;
@@ -266,6 +271,12 @@ canvas {
 
 .slot.empty {
   background: rgba(20, 20, 20, 0.55);
+}
+
+.slot.result {
+  width: 56px;
+  height: 56px;
+  border-color: #d4a017;
 }
 
 .slot.result {
@@ -297,6 +308,17 @@ canvas {
   text-shadow: 1px 1px 0 #000;
   font-variant-numeric: tabular-nums;
   pointer-events: none;
+}
+
+.slot .count,
+#cursor-item .count {
+  position: absolute;
+  bottom: 2px;
+  right: 3px;
+  font-size: 11px;
+  color: #fff;
+  text-shadow: 1px 1px 0 #000;
+  font-weight: 700;
 }
 
 .slot .count,
