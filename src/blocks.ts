@@ -45,6 +45,11 @@ export function isOpaque(id: number): boolean {
   return id !== Block.Air && id !== Block.Water && id !== Block.Leaves;
 }
 
+/** True if this item can be placed as a world block (not tools, coal, sticks, …). */
+export function isPlaceable(id: number): boolean {
+  return FACE_TILES[id] != null;
+}
+
 /** Face order: +X, -X, +Y, -Y, +Z, -Z — atlas tile indices */
 export type FaceTiles = [number, number, number, number, number, number];
 

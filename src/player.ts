@@ -1,5 +1,7 @@
 import * as THREE from "three";
-import { Block, HOTBAR, isSolid } from "./blocks";
+import { Block, isPlaceable, isSolid } from "./blocks";
+import { HeldItem } from "./heldItem";
+import { Inventory } from "./inventory";
 import { World, WORLD_HEIGHT } from "./world";
 
 const EYE_HEIGHT = 1.62;
@@ -17,6 +19,7 @@ export class Player {
   velocity = new THREE.Vector3();
   onGround = false;
   selected = 0;
+  readonly inventory = new Inventory();
 
   private yaw = 0;
   private pitch = 0;
@@ -24,6 +27,7 @@ export class Player {
   private world: World;
   private locked = false;
   private highlight: THREE.LineSegments;
+  private held: HeldItem;
   private target: {
     x: number;
     y: number;
@@ -36,6 +40,9 @@ export class Player {
   constructor(world: World, camera: THREE.PerspectiveCamera, scene: THREE.Scene) {
     this.world = world;
     this.camera = camera;
+    scene.add(this.camera);
+    this.held = new HeldItem(camera);
+    this.held.setItem(this.handItemId());
 
     const geo = new THREE.EdgesGeometry(new THREE.BoxGeometry(1.002, 1.002, 1.002));
     this.highlight = new THREE.LineSegments(
@@ -71,8 +78,9 @@ export class Player {
     window.addEventListener("contextmenu", (e) => e.preventDefault());
     window.addEventListener("wheel", (e) => {
       if (!this.locked) return;
-      if (e.deltaY > 0) this.selected = (this.selected + 1) % HOTBAR.length;
-      else this.selected = (this.selected - 1 + HOTBAR.length) % HOTBAR.length;
+      const n = this.inventory.slots.length;
+      if (e.deltaY > 0) this.selected = (this.selected + 1) % n;
+      else this.selected = (this.selected - 1 + n) % n;
     });
   }
 
@@ -188,7 +196,8 @@ export class Player {
     if (this.keys.has("KeyS")) wish.sub(forward);
     if (this.keys.has("KeyD")) wish.add(right);
     if (this.keys.has("KeyA") || this.keys.has("KeyQ")) wish.sub(right);
-    if (wish.lengthSq() > 0) wish.normalize();
+    const walking = wish.lengthSq() > 0;
+    if (walking) wish.normalize();
 
     const sprint = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
     const speed = sprint ? SPRINT : SPEED;
@@ -247,6 +256,8 @@ export class Player {
 
     this.updateRaycast();
     this.world.updateAround(this.position.x, this.position.z);
+    this.held.setItem(this.handItemId());
+    this.held.update(dt, walking && this.onGround);
   }
 
   private updateRaycast(): void {
@@ -307,7 +318,10 @@ export class Player {
   }
 
   private placeBlock(): void {
+    const stack = this.inventory.get(this.selected);
+    if (!stack || !isPlaceable(stack.id)) return;
     if (!this.target) return;
+
     const x = this.target.x + this.target.nx;
     const y = this.target.y + this.target.ny;
     const z = this.target.z + this.target.nz;
@@ -327,10 +341,18 @@ export class Player {
     )
       return;
 
-    this.world.setBlock(x, y, z, HOTBAR[this.selected]);
+    this.world.setBlock(x, y, z, stack.id);
+    this.inventory.consume(this.selected);
+    this.held.setItem(this.handItemId());
+  }
+
+  /** Block currently in hand, or null if the selected slot is empty. */
+  handItemId(): number | null {
+    const stack = this.inventory.get(this.selected);
+    return stack && stack.count > 0 ? stack.id : null;
   }
 
   getSelectedBlock(): number {
-    return HOTBAR[this.selected];
+    return this.handItemId() ?? 0;
   }
 }

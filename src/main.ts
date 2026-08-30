@@ -2,7 +2,8 @@ import "./style.css";
 import * as THREE from "three";
 import { World } from "./world";
 import { Player } from "./player";
-import { BLOCK_NAMES, HOTBAR } from "./blocks";
+import { BLOCK_NAMES } from "./blocks";
+import { HOTBAR_SIZE } from "./inventory";
 import { createHotbarIcon } from "./textures";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
@@ -13,7 +14,7 @@ app.innerHTML = `
     <p>Clique pour jouer</p>
     <div class="hint">
       ZQSD / WASD — bouger · Souris — regarder · Espace — sauter<br/>
-      Clic gauche — casser · Clic droit — poser · 1–9 / molette — inventaire<br/>
+      Clic gauche — casser · Clic droit — poser l’objet en main · 1–9 / molette — choisir<br/>
       Shift — sprint
     </div>
   </div>
@@ -27,18 +28,29 @@ const crosshair = document.querySelector<HTMLDivElement>("#crosshair")!;
 const hotbarEl = document.querySelector<HTMLDivElement>("#hotbar")!;
 const infoEl = document.querySelector<HTMLDivElement>("#info")!;
 
-HOTBAR.forEach((block, i) => {
+type SlotView = {
+  root: HTMLDivElement;
+  icon: HTMLCanvasElement | null;
+  count: HTMLSpanElement;
+  itemId: number | null;
+};
+
+const slotViews: SlotView[] = [];
+
+for (let i = 0; i < HOTBAR_SIZE; i++) {
   const slot = document.createElement("div");
   slot.className = "slot" + (i === 0 ? " selected" : "");
   slot.dataset.index = String(i);
-  const icon = createHotbarIcon(block);
-  slot.appendChild(icon);
+  const count = document.createElement("span");
+  count.className = "count";
+  slot.appendChild(count);
   const key = document.createElement("span");
   key.className = "key";
   key.textContent = String(i + 1);
   slot.appendChild(key);
   hotbarEl.appendChild(slot);
-});
+  slotViews.push({ root: slot, icon: null, count, itemId: null });
+}
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
@@ -108,9 +120,26 @@ let fps = 0;
 let fpsTimer = 0;
 
 function updateHotbar(): void {
-  hotbarEl.querySelectorAll(".slot").forEach((el, i) => {
-    el.classList.toggle("selected", i === player.selected);
-  });
+  for (let i = 0; i < HOTBAR_SIZE; i++) {
+    const view = slotViews[i];
+    const stack = player.inventory.get(i);
+    view.root.classList.toggle("selected", i === player.selected);
+    view.root.classList.toggle("empty", !stack);
+
+    const id = stack?.id ?? null;
+    if (id !== view.itemId) {
+      view.icon?.remove();
+      view.icon = null;
+      view.itemId = id;
+      if (id != null) {
+        const icon = createHotbarIcon(id);
+        view.root.insertBefore(icon, view.count);
+        view.icon = icon;
+      }
+    }
+
+    view.count.textContent = stack && stack.count > 1 ? String(stack.count) : "";
+  }
 }
 
 function loop(now: number): void {
@@ -132,7 +161,9 @@ function loop(now: number): void {
 
   updateHotbar();
   const b = player.getSelectedBlock();
-  infoEl.textContent = `${fps} FPS\nXYZ ${player.position.x.toFixed(1)} ${player.position.y.toFixed(1)} ${player.position.z.toFixed(1)}\n${BLOCK_NAMES[b] ?? ""}`;
+  const stack = player.inventory.get(player.selected);
+  const heldName = BLOCK_NAMES[b] ?? (stack ? "" : "Main vide");
+  infoEl.textContent = `${fps} FPS\nXYZ ${player.position.x.toFixed(1)} ${player.position.y.toFixed(1)} ${player.position.z.toFixed(1)}\n${heldName}`;
 
   renderer.render(scene, camera);
   requestAnimationFrame(loop);

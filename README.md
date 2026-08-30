@@ -21,4 +21,6 @@ Ouvre l’URL affichée (souvent `http://localhost:5173`), clique pour capturer 
 | Sprint | Shift |
 | Casser | Clic gauche |
 | Poser | Clic droit |
-| Choisir un bloc | 1–9 ou molette |
+| Choisir un bloc (main) | 1–9 ou molette |
+
+L’objet sélectionné dans la barre 1–9 est tenu en main ; clic droit le pose dans le monde.
