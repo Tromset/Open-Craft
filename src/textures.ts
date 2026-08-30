@@ -174,7 +174,7 @@ function drawGlass(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   for (let py = 0; py < TILE_SIZE; py++) {
     for (let px = 0; px < TILE_SIZE; px++) {
       const i = (py * TILE_SIZE + px) * 4;
-      const edge = px < 2 || px > 13 || py < 2 || py > 13 || px === py || px + py === 15;
+      const edge = px < 2 || px > 13 || py < 2 || py > 13;
       d[i] = edge ? 210 : 170;
       d[i + 1] = edge ? 230 : 200;
       d[i + 2] = edge ? 240 : 220;
@@ -418,7 +418,7 @@ export function createAtlas(): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = ATLAS_COLS * TILE_SIZE;
   canvas.height = ATLAS_ROWS * TILE_SIZE;
-  const ctx = canvas.getContext("2d")!;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const at = (i: number) => tileXY(i);
