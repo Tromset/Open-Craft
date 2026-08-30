@@ -26,7 +26,8 @@ canvas {
   height: 100%;
 }
 
-#overlay {
+#overlay,
+#death {
   position: absolute;
   inset: 0;
   display: flex;
@@ -44,12 +45,22 @@ canvas {
   transition: opacity 0.25s;
 }
 
-#overlay.hidden {
+#death {
+  background: rgba(40, 0, 0, 0.72);
+}
+
+#overlay.hidden,
+#death.hidden,
+#inv-screen.hidden,
+#toast.hidden,
+#cursor-item.hidden,
+#air-bar.hidden {
   opacity: 0;
   pointer-events: none;
 }
 
-#overlay h1 {
+#overlay h1,
+#death h1 {
   font-size: clamp(2.5rem, 8vw, 4.5rem);
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -58,7 +69,13 @@ canvas {
   margin-bottom: 0.4rem;
 }
 
-#overlay p {
+#death h1 {
+  color: #e85a5a;
+  text-shadow: 4px 4px 0 #4a1010;
+}
+
+#overlay p,
+#death p {
   font-size: 1.05rem;
   opacity: 0.85;
   margin-bottom: 1.5rem;
@@ -67,7 +84,7 @@ canvas {
 #overlay .hint {
   font-size: 0.85rem;
   opacity: 0.55;
-  max-width: 360px;
+  max-width: 420px;
   text-align: center;
   line-height: 1.5;
 }
@@ -112,6 +129,93 @@ canvas {
   transform: translateY(-50%);
 }
 
+#mine-bar {
+  position: absolute;
+  top: calc(50% + 22px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 84px;
+  height: 6px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 3px;
+  z-index: 5;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#mine-bar.visible {
+  opacity: 1;
+}
+
+#mine-fill {
+  height: 100%;
+  width: 0;
+  background: #e8e8e8;
+}
+
+#status {
+  position: absolute;
+  bottom: 86px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  opacity: 0;
+  pointer-events: none;
+  text-align: center;
+}
+
+#status.visible {
+  opacity: 1;
+}
+
+#hearts,
+#hunger-bar,
+#air-bar {
+  display: flex;
+  gap: 2px;
+  justify-content: center;
+  text-shadow: 0 1px 2px #000;
+}
+
+#hunger-bar {
+  margin-top: 2px;
+}
+
+.icon {
+  font-size: 16px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 1px #000);
+}
+
+.icon.empty {
+  opacity: 0.25;
+}
+
+.icon.half {
+  opacity: 0.65;
+}
+
+.heart {
+  color: #e03131;
+}
+
+.drum {
+  font-size: 13px;
+}
+
+.bubble {
+  color: #74c0fc;
+  font-size: 12px;
+}
+
+.mode-tag {
+  color: #ffe066;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 #hotbar {
   position: absolute;
   bottom: 24px;
@@ -146,6 +250,11 @@ canvas {
   transition: transform 0.08s ease, box-shadow 0.08s ease, border-color 0.08s ease;
 }
 
+.slot.selected,
+.slot.hot {
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
 .slot.selected {
   border-color: #fff;
   border-width: 3px;
@@ -157,6 +266,12 @@ canvas {
 
 .slot.empty {
   background: rgba(20, 20, 20, 0.55);
+}
+
+.slot.result {
+  width: 56px;
+  height: 56px;
+  border-color: #d4a017;
 }
 
 .slot canvas {
@@ -184,6 +299,17 @@ canvas {
   pointer-events: none;
 }
 
+.slot .count,
+#cursor-item .count {
+  position: absolute;
+  bottom: 2px;
+  right: 3px;
+  font-size: 11px;
+  color: #fff;
+  text-shadow: 1px 1px 0 #000;
+  font-weight: 700;
+}
+
 #info {
   position: absolute;
   top: 12px;
@@ -196,8 +322,112 @@ canvas {
   text-shadow: 1px 1px 2px #000;
   font-family: ui-monospace, monospace;
   white-space: pre;
+  pointer-events: none;
 }
 
 #info.visible {
   opacity: 1;
+}
+
+#toast {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 6px;
+  z-index: 20;
+  font-size: 14px;
+  transition: opacity 0.2s;
+}
+
+#inv-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 15;
+  cursor: default;
+}
+
+#inv-screen.hidden {
+  display: none;
+  opacity: 0;
+}
+
+.inv-panel {
+  background: #c6c6c6;
+  border: 4px solid #373737;
+  box-shadow: inset 2px 2px 0 #fff, 4px 4px 0 rgba(0, 0, 0, 0.4);
+  padding: 16px 18px 12px;
+  min-width: 420px;
+}
+
+.inv-panel h2 {
+  font-size: 16px;
+  color: #3f3f3f;
+  margin-bottom: 10px;
+}
+
+#craft-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.craft-grid {
+  display: grid;
+  gap: 4px;
+}
+
+.craft-grid.cols-2 {
+  grid-template-columns: repeat(2, 48px);
+}
+
+.craft-grid.cols-3 {
+  grid-template-columns: repeat(3, 48px);
+}
+
+.craft-arrow {
+  font-size: 28px;
+  color: #555;
+}
+
+#inv-grid {
+  display: grid;
+  grid-template-columns: repeat(9, 48px);
+  gap: 4px;
+}
+
+#inv-grid .slot,
+#craft-row .slot {
+  pointer-events: auto;
+  cursor: pointer;
+  background: #8b8b8b;
+  border-color: #373737;
+}
+
+.inv-hint {
+  margin-top: 10px;
+  font-size: 11px;
+  color: #444;
+}
+
+#cursor-item {
+  position: fixed;
+  pointer-events: none;
+  z-index: 30;
+  width: 36px;
+  height: 36px;
+  image-rendering: pixelated;
+}
+
+#cursor-item canvas {
+  width: 32px;
+  height: 32px;
 }

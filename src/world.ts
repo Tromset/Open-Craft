@@ -7,14 +7,16 @@ import {
   isOpaque,
   isSolid,
 } from "./blocks";
-import { fbm2, noise2 } from "./noise";
+import { fbm2, fbm3, noise2, noise3 } from "./noise";
 import { createAtlas } from "./textures";
 
 export const CHUNK_SIZE = 16;
 export const WORLD_HEIGHT = 64;
 export const SEA_LEVEL = 28;
-const RENDER_DISTANCE = 3;
-const MESHES_PER_FRAME = 3;
+export const RENDER_DISTANCE = 5;
+const MESHES_PER_FRAME = 2;
+
+export type Biome = "plains" | "forest" | "desert" | "snow";
 
 const FACE_DIRS: [number, number, number][] = [
   [1, 0, 0],
@@ -26,42 +28,36 @@ const FACE_DIRS: [number, number, number][] = [
 ];
 
 const FACE_VERTS: number[][][] = [
-  // +X
   [
     [1, 0, 1],
     [1, 0, 0],
     [1, 1, 0],
     [1, 1, 1],
   ],
-  // -X
   [
     [0, 0, 0],
     [0, 0, 1],
     [0, 1, 1],
     [0, 1, 0],
   ],
-  // +Y
   [
     [0, 1, 1],
     [1, 1, 1],
     [1, 1, 0],
     [0, 1, 0],
   ],
-  // -Y
   [
     [0, 0, 0],
     [1, 0, 0],
     [1, 0, 1],
     [0, 0, 1],
   ],
-  // +Z
   [
     [0, 0, 1],
     [1, 0, 1],
     [1, 1, 1],
     [0, 1, 1],
   ],
-  // -Z
   [
     [1, 0, 0],
     [0, 0, 0],
@@ -71,42 +67,36 @@ const FACE_VERTS: number[][][] = [
 ];
 
 const AO_DIRS: [number, number, number][][] = [
-  // +X — corners for verts order
   [
     [1, -1, 1],
     [1, -1, -1],
     [1, 1, -1],
     [1, 1, 1],
   ],
-  // -X
   [
     [-1, -1, -1],
     [-1, -1, 1],
     [-1, 1, 1],
     [-1, 1, -1],
   ],
-  // +Y
   [
     [-1, 1, 1],
     [1, 1, 1],
     [1, 1, -1],
     [-1, 1, -1],
   ],
-  // -Y
   [
     [-1, -1, -1],
     [1, -1, -1],
     [1, -1, 1],
     [-1, -1, 1],
   ],
-  // +Z
   [
     [-1, -1, 1],
     [1, -1, 1],
     [1, 1, 1],
     [-1, 1, 1],
   ],
-  // -Z
   [
     [1, -1, -1],
     [-1, -1, -1],
@@ -121,10 +111,13 @@ function key(cx: number, cz: number): ChunkKey {
   return `${cx},${cz}`;
 }
 
+function posKey(x: number, y: number, z: number): string {
+  return `${x},${y},${z}`;
+}
+
 function tileUV(tile: number): { u0: number; v0: number; u1: number; v1: number } {
   const col = tile % ATLAS_COLS;
   const row = Math.floor(tile / ATLAS_COLS);
-  // flipY=false → V grows downward like the canvas
   const u0 = col / ATLAS_COLS;
   const v0 = row / ATLAS_ROWS;
   const u1 = (col + 1) / ATLAS_COLS;
@@ -142,6 +135,8 @@ export class World {
   private material: THREE.MeshLambertMaterial;
   private waterMaterial: THREE.MeshLambertMaterial;
   private dirty = new Set<ChunkKey>();
+  private edits = new Map<string, number>();
+  private torches = new Set<string>();
 
   constructor(scene: THREE.Scene, seed = 42) {
     this.scene = scene;
@@ -178,6 +173,7 @@ export class World {
     if (!data) {
       data = this.generateChunk(cx, cz);
       this.chunks.set(k, data);
+      this.applyEditsToChunk(cx, cz, data);
       this.dirty.add(k);
     }
     return data;
@@ -198,51 +194,128 @@ export class World {
     return data[this.idx(lx, y, lz)];
   }
 
-  setBlock(x: number, y: number, z: number, id: number): void {
+  setBlock(x: number, y: number, z: number, id: number, record = true): void {
     if (y < 0 || y >= WORLD_HEIGHT) return;
     const cx = Math.floor(x / CHUNK_SIZE);
     const cz = Math.floor(z / CHUNK_SIZE);
     const lx = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
     const lz = ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
     const data = this.chunkData(cx, cz);
+    const prev = data[this.idx(lx, y, lz)];
     data[this.idx(lx, y, lz)] = id;
     this.dirty.add(key(cx, cz));
-    // rebuild neighbors if on edge
     if (lx === 0) this.dirty.add(key(cx - 1, cz));
     if (lx === CHUNK_SIZE - 1) this.dirty.add(key(cx + 1, cz));
     if (lz === 0) this.dirty.add(key(cx, cz - 1));
     if (lz === CHUNK_SIZE - 1) this.dirty.add(key(cx, cz + 1));
+
+    const pk = posKey(x, y, z);
+    if (prev === Block.Torch) this.torches.delete(pk);
+    if (id === Block.Torch) this.torches.add(pk);
+    if (record) this.edits.set(pk, id);
   }
 
-  private heightAt(wx: number, wz: number): number {
+  exportEdits(): number[] {
+    const out: number[] = [];
+    for (const [k, id] of this.edits) {
+      const [x, y, z] = k.split(",").map(Number);
+      out.push(x, y, z, id);
+    }
+    return out;
+  }
+
+  importEdits(packed: number[]): void {
+    for (let i = 0; i + 3 < packed.length; i += 4) {
+      this.edits.set(posKey(packed[i], packed[i + 1], packed[i + 2]), packed[i + 3]);
+    }
+    for (const [k, data] of this.chunks) {
+      const [cx, cz] = k.split(",").map(Number);
+      this.applyEditsToChunk(cx, cz, data);
+      this.dirty.add(k);
+    }
+  }
+
+  private applyEditsToChunk(cx: number, cz: number, data: Uint8Array): void {
+    const x0 = cx * CHUNK_SIZE;
+    const z0 = cz * CHUNK_SIZE;
+    for (const [k, id] of this.edits) {
+      const [x, y, z] = k.split(",").map(Number);
+      if (x < x0 || x >= x0 + CHUNK_SIZE || z < z0 || z >= z0 + CHUNK_SIZE) continue;
+      if (y < 0 || y >= WORLD_HEIGHT) continue;
+      const lx = x - x0;
+      const lz = z - z0;
+      data[this.idx(lx, y, lz)] = id;
+      const pk = posKey(x, y, z);
+      if (id === Block.Torch) this.torches.add(pk);
+      else this.torches.delete(pk);
+    }
+  }
+
+  nearestTorches(px: number, py: number, pz: number, limit: number): [number, number, number][] {
+    const list: { d: number; x: number; y: number; z: number }[] = [];
+    for (const k of this.torches) {
+      const [x, y, z] = k.split(",").map(Number);
+      const d = (x - px) ** 2 + (y - py) ** 2 + (z - pz) ** 2;
+      list.push({ d, x, y, z });
+    }
+    list.sort((a, b) => a.d - b.d);
+    return list.slice(0, limit).map((t) => [t.x, t.y, t.z]);
+  }
+
+  heightAt(wx: number, wz: number): number {
     const n = fbm2(wx * 0.02, wz * 0.02, 4, this.seed);
     const mountain =
-      Math.pow(Math.max(0, fbm2(wx * 0.01, wz * 0.01, 2, this.seed + 200) - 0.5), 2) * 20;
+      Math.pow(Math.max(0, fbm2(wx * 0.01, wz * 0.01, 2, this.seed + 200) - 0.5), 2) * 22;
     return Math.floor(SEA_LEVEL + (n - 0.45) * 18 + mountain);
+  }
+
+  biomeAt(wx: number, wz: number): Biome {
+    const h = this.heightAt(wx, wz);
+    const moist = noise2(wx * 0.008, wz * 0.008, this.seed + 50);
+    if (h >= SEA_LEVEL + 16) return "snow";
+    if (moist < 0.32) return "desert";
+    if (moist > 0.58) return "forest";
+    return "plains";
+  }
+
+  biomeLabel(wx: number, wz: number): string {
+    switch (this.biomeAt(wx, wz)) {
+      case "forest":
+        return "Forêt";
+      case "desert":
+        return "Désert";
+      case "snow":
+        return "Sommet enneigé";
+      default:
+        return "Plaine";
+    }
   }
 
   private generateChunk(cx: number, cz: number): Uint8Array {
     const data = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
     const trees: [number, number, number][] = [];
+    const cacti: [number, number, number][] = [];
 
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
         const wx = cx * CHUNK_SIZE + lx;
         const wz = cz * CHUNK_SIZE + lz;
         const h = this.heightAt(wx, wz);
-        const biome = noise2(wx * 0.01, wz * 0.01, this.seed + 50);
+        const biome = this.biomeAt(wx, wz);
 
         for (let y = 0; y <= Math.max(h, SEA_LEVEL); y++) {
           let id: number = Block.Air;
           if (y === 0) {
-            id = Block.Stone;
+            id = Block.Bedrock;
           } else if (y <= h) {
             if (y === h) {
               if (h < SEA_LEVEL - 1) id = Block.Sand;
-              else if (biome < 0.35 && h <= SEA_LEVEL + 2) id = Block.Sand;
+              else if (biome === "desert") id = Block.Sand;
+              else if (biome === "snow") id = Block.Snow;
               else id = Block.Grass;
             } else if (y >= h - 3) {
-              id = h < SEA_LEVEL - 1 ? Block.Sand : Block.Dirt;
+              if (h < SEA_LEVEL - 1 || biome === "desert") id = Block.Sand;
+              else id = Block.Dirt;
             } else {
               id = Block.Stone;
             }
@@ -252,16 +325,39 @@ export class World {
           data[this.idx(lx, y, lz)] = id;
         }
 
-        if (
-          h > SEA_LEVEL &&
-          data[this.idx(lx, h, lz)] === Block.Grass &&
-          noise2(wx * 0.5, wz * 0.5, this.seed + 999) > 0.9 &&
-          lx > 1 &&
-          lx < CHUNK_SIZE - 2 &&
-          lz > 1 &&
-          lz < CHUNK_SIZE - 2
-        ) {
-          trees.push([lx, h + 1, lz]);
+        for (let y = 1; y < h; y++) {
+          const cur = data[this.idx(lx, y, lz)];
+          if (cur !== Block.Stone) continue;
+
+          const cave =
+            fbm3(wx * 0.06, y * 0.09, wz * 0.06, 3, this.seed + 400) > 0.62 &&
+            noise3(wx * 0.11, y * 0.12, wz * 0.11, this.seed + 801) > 0.52;
+          if (cave && y < h - 1) {
+            data[this.idx(lx, y, lz)] = Block.Air;
+            continue;
+          }
+
+          const nDia = noise3(wx * 0.22, y * 0.22, wz * 0.22, this.seed + 33);
+          const nIron = noise3(wx * 0.18, y * 0.18, wz * 0.18, this.seed + 22);
+          const nCoal = noise3(wx * 0.14, y * 0.14, wz * 0.14, this.seed + 11);
+          if (y < 12 && nDia > 0.935) data[this.idx(lx, y, lz)] = Block.DiamondOre;
+          else if (y > 2 && y < 40 && nIron > 0.895) data[this.idx(lx, y, lz)] = Block.IronOre;
+          else if (y > 2 && y < 56 && nCoal > 0.855) data[this.idx(lx, y, lz)] = Block.CoalOre;
+          else if (nCoal < 0.08 && y < 20) data[this.idx(lx, y, lz)] = Block.Gravel;
+        }
+
+        const deco = noise2(wx * 0.5, wz * 0.5, this.seed + 999);
+        const edge = lx > 1 && lx < CHUNK_SIZE - 2 && lz > 1 && lz < CHUNK_SIZE - 2;
+        if (h > SEA_LEVEL && edge) {
+          if (biome === "forest" && data[this.idx(lx, h, lz)] === Block.Grass && deco > 0.72) {
+            trees.push([lx, h + 1, lz]);
+          } else if (biome === "plains" && data[this.idx(lx, h, lz)] === Block.Grass && deco > 0.9) {
+            trees.push([lx, h + 1, lz]);
+          } else if (biome === "snow" && data[this.idx(lx, h, lz)] === Block.Snow && deco > 0.94) {
+            trees.push([lx, h + 1, lz]);
+          } else if (biome === "desert" && data[this.idx(lx, h, lz)] === Block.Sand && deco > 0.86) {
+            cacti.push([lx, h + 1, lz]);
+          }
         }
       }
     }
@@ -293,6 +389,16 @@ export class World {
               data[this.idx(lx, y, lz)] = Block.Leaves;
             }
           }
+        }
+      }
+    }
+
+    for (const [tx, ty, tz] of cacti) {
+      const ch = 2 + Math.floor(noise2(tx + 3, tz + 7, this.seed + 4) * 2);
+      for (let i = 0; i < ch; i++) {
+        const y = ty + i;
+        if (y < WORLD_HEIGHT && data[this.idx(tx, y, tz)] === Block.Air) {
+          data[this.idx(tx, y, tz)] = Block.Cactus;
         }
       }
     }
@@ -336,9 +442,113 @@ export class World {
     return 3 - (side1 + side2 + cornerB);
   }
 
+  private addQuad(
+    positions: number[],
+    normals: number[],
+    uvs: number[],
+    colors: number[],
+    indices: number[],
+    base: number,
+    wx: number,
+    y: number,
+    wz: number,
+    f: number,
+    tiles: [number, number, number, number, number, number],
+    skipAO = false,
+    tint?: [number, number, number],
+  ): number {
+    const [dx, dy, dz] = FACE_DIRS[f];
+    const { u0, v0, u1, v1 } = tileUV(tiles[f]);
+    const uvCoords = [
+      [u0, v1],
+      [u1, v1],
+      [u1, v0],
+      [u0, v0],
+    ];
+    const ao: number[] = [];
+    for (let v = 0; v < 4; v++) {
+      ao.push(skipAO ? 1 : this.vertexAO(wx, y, wz, f, v) / 3);
+    }
+    const flip = ao[0] + ao[2] > ao[1] + ao[3];
+    for (let v = 0; v < 4; v++) {
+      const vert = FACE_VERTS[f][v];
+      positions.push(wx + vert[0], y + vert[1], wz + vert[2]);
+      normals.push(dx, dy, dz);
+      uvs.push(uvCoords[v][0], uvCoords[v][1]);
+      const shade = 0.55 + ao[v] * 0.45;
+      const faceShade = f === 2 ? 1 : f === 3 ? 0.55 : f === 0 || f === 1 ? 0.8 : 0.9;
+      const s = shade * faceShade;
+      if (tint) colors.push(s * tint[0], s * tint[1], s * tint[2]);
+      else colors.push(s, s, s);
+    }
+    if (flip) indices.push(base, base + 1, base + 3, base + 1, base + 2, base + 3);
+    else indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    return base + 4;
+  }
+
+  private addTorch(
+    positions: number[],
+    normals: number[],
+    uvs: number[],
+    colors: number[],
+    indices: number[],
+    base: number,
+    wx: number,
+    y: number,
+    wz: number,
+  ): number {
+    const tiles = FACE_TILES[Block.Torch];
+    const { u0, v0, u1, v1 } = tileUV(tiles[0]);
+    const planes: { verts: number[][]; n: [number, number, number] }[] = [
+      {
+        n: [0, 0, 1],
+        verts: [
+          [0.15, 0, 0.5],
+          [0.85, 0, 0.5],
+          [0.85, 0.9, 0.5],
+          [0.15, 0.9, 0.5],
+        ],
+      },
+      {
+        n: [1, 0, 0],
+        verts: [
+          [0.5, 0, 0.15],
+          [0.5, 0, 0.85],
+          [0.5, 0.9, 0.85],
+          [0.5, 0.9, 0.15],
+        ],
+      },
+    ];
+    for (const plane of planes) {
+      for (const sign of [1, -1]) {
+        const uvCoords = [
+          [u0, v1],
+          [u1, v1],
+          [u1, v0],
+          [u0, v0],
+        ];
+        for (let v = 0; v < 4; v++) {
+          const vert = plane.verts[v];
+          positions.push(wx + vert[0], y + vert[1], wz + vert[2]);
+          normals.push(plane.n[0] * sign, 0, plane.n[2] * sign);
+          uvs.push(uvCoords[v][0], uvCoords[v][1]);
+          colors.push(1.15, 1.05, 0.85);
+        }
+        if (sign > 0) indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+        else indices.push(base, base + 2, base + 1, base, base + 3, base + 2);
+        base += 4;
+      }
+    }
+    return base;
+  }
+
   private buildMesh(cx: number, cz: number): void {
     const k = key(cx, cz);
     this.chunkData(cx, cz);
+    this.chunkData(cx - 1, cz);
+    this.chunkData(cx + 1, cz);
+    this.chunkData(cx, cz - 1);
+    this.chunkData(cx, cz + 1);
 
     const positions: number[] = [];
     const normals: number[] = [];
@@ -363,6 +573,11 @@ export class World {
           const id = this.getBlock(wx, y, wz);
           if (id === Block.Air) continue;
 
+          if (id === Block.Torch) {
+            solidCount = this.addTorch(positions, normals, uvs, colors, indices, solidCount, wx, y, wz);
+            continue;
+          }
+
           const tiles = FACE_TILES[id];
           if (!tiles) continue;
           const isWater = id === Block.Water;
@@ -376,60 +591,45 @@ export class World {
             } else {
               if (isOpaque(nId)) continue;
               if (nId === Block.Leaves && id === Block.Leaves) continue;
+              if (nId === Block.Glass && id === Block.Glass) continue;
             }
 
-            const targetPos = isWater ? wPos : positions;
-            const targetNorm = isWater ? wNorm : normals;
-            const targetUv = isWater ? wUvs : uvs;
-            const targetCol = isWater ? wColors : colors;
-            const targetIdx = isWater ? wIndices : indices;
-            let base = isWater ? waterCount : solidCount;
-
-            const { u0, v0, u1, v1 } = tileUV(tiles[f]);
-            // v0=top of tile in canvas space (smaller v with flipY false... actually row grows down so v0 is top)
-            const uvCoords = [
-              [u0, v1],
-              [u1, v1],
-              [u1, v0],
-              [u0, v0],
-            ];
-
-            const ao: number[] = [];
-            for (let v = 0; v < 4; v++) {
-              ao.push(this.vertexAO(wx, y, wz, f, v) / 3);
-            }
-
-            // flip quad if AO would cause anisotropy
-            const flip = ao[0] + ao[2] > ao[1] + ao[3];
-
-            for (let v = 0; v < 4; v++) {
-              const vert = FACE_VERTS[f][v];
-              targetPos.push(wx + vert[0], y + vert[1], wz + vert[2]);
-              targetNorm.push(dx, dy, dz);
-              targetUv.push(uvCoords[v][0], uvCoords[v][1]);
-              const shade = 0.55 + ao[v] * 0.45;
-              // face shading
-              const faceShade =
-                f === 2 ? 1 : f === 3 ? 0.55 : f === 0 || f === 1 ? 0.8 : 0.9;
-              const s = shade * faceShade;
-              targetCol.push(s, s, s);
-            }
-
-            // Standard CCW winding when viewed from outside
-            if (flip) {
-              targetIdx.push(base, base + 1, base + 3, base + 1, base + 2, base + 3);
+            if (isWater) {
+              waterCount = this.addQuad(
+                wPos,
+                wNorm,
+                wUvs,
+                wColors,
+                wIndices,
+                waterCount,
+                wx,
+                y,
+                wz,
+                f,
+                tiles,
+                true,
+                [0.7, 0.85, 1],
+              );
             } else {
-              targetIdx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+              solidCount = this.addQuad(
+                positions,
+                normals,
+                uvs,
+                colors,
+                indices,
+                solidCount,
+                wx,
+                y,
+                wz,
+                f,
+                tiles,
+              );
             }
-
-            if (isWater) waterCount += 4;
-            else solidCount += 4;
           }
         }
       }
     }
 
-    // solid mesh
     const old = this.meshes.get(k);
     if (old) {
       this.scene.remove(old);
@@ -450,7 +650,6 @@ export class World {
       this.meshes.delete(k);
     }
 
-    // water mesh
     const oldW = this.waterMeshes.get(k);
     if (oldW) {
       this.scene.remove(oldW);
@@ -473,10 +672,8 @@ export class World {
     this.dirty.delete(k);
   }
 
-  /** Ensure chunk data exists and build the mesh for one chunk. */
   ensureChunk(cx: number, cz: number): void {
     this.chunkData(cx, cz);
-    // preload neighbor data for seamless faces
     for (let dx = -1; dx <= 1; dx++) {
       for (let dz = -1; dz <= 1; dz++) {
         this.chunkData(cx + dx, cz + dz);
@@ -485,7 +682,6 @@ export class World {
     this.buildMesh(cx, cz);
   }
 
-  /** Build up to `limit` dirty meshes. */
   flushMeshes(limit = 4): number {
     let built = 0;
     for (const k of [...this.dirty]) {
@@ -497,25 +693,33 @@ export class World {
     return built;
   }
 
-  updateAround(px: number, pz: number): void {
+  updateAround(px: number, pz: number, genLimit = 4, meshLimit = MESHES_PER_FRAME): void {
     const pcx = Math.floor(px / CHUNK_SIZE);
     const pcz = Math.floor(pz / CHUNK_SIZE);
 
-    const needed = new Set<ChunkKey>();
+    const needed: { k: ChunkKey; cx: number; cz: number; d: number }[] = [];
     for (let dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE; dx++) {
       for (let dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE; dz++) {
         if (dx * dx + dz * dz > RENDER_DISTANCE * RENDER_DISTANCE) continue;
         const cx = pcx + dx;
         const cz = pcz + dz;
-        const k = key(cx, cz);
-        needed.add(k);
-        this.chunkData(cx, cz);
+        needed.push({ k: key(cx, cz), cx, cz, d: dx * dx + dz * dz });
+      }
+    }
+    needed.sort((a, b) => a.d - b.d);
+    const neededSet = new Set(needed.map((n) => n.k));
+
+    let generated = 0;
+    for (const n of needed) {
+      if (!this.chunks.has(n.k)) {
+        if (generated >= genLimit) continue;
+        this.chunkData(n.cx, n.cz);
+        generated++;
       }
     }
 
-    // unload far chunks
     for (const k of [...this.meshes.keys()]) {
-      if (!needed.has(k)) {
+      if (!neededSet.has(k)) {
         const m = this.meshes.get(k)!;
         this.scene.remove(m);
         m.geometry.dispose();
@@ -523,7 +727,7 @@ export class World {
       }
     }
     for (const k of [...this.waterMeshes.keys()]) {
-      if (!needed.has(k)) {
+      if (!neededSet.has(k)) {
         const m = this.waterMeshes.get(k)!;
         this.scene.remove(m);
         m.geometry.dispose();
@@ -531,21 +735,28 @@ export class World {
       }
     }
 
-    // build a few dirty chunks per frame
     let built = 0;
-    for (const k of this.dirty) {
-      if (!needed.has(k)) {
+    for (const k of [...this.dirty]) {
+      if (!neededSet.has(k)) {
         this.dirty.delete(k);
         continue;
       }
+      if (!this.chunks.has(k)) continue;
       const [cx, cz] = k.split(",").map(Number);
       this.buildMesh(cx, cz);
       built++;
-      if (built >= MESHES_PER_FRAME) break;
+      if (built >= meshLimit) break;
     }
   }
 
-  collides(box: { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }): boolean {
+  collides(box: {
+    minX: number;
+    minY: number;
+    minZ: number;
+    maxX: number;
+    maxY: number;
+    maxZ: number;
+  }): boolean {
     const x0 = Math.floor(box.minX);
     const y0 = Math.floor(box.minY);
     const z0 = Math.floor(box.minZ);
