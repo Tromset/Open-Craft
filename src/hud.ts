@@ -51,7 +51,7 @@ export class Hud {
         <p>Clique pour jouer</p>
         <div class="hint">
           ZQSD / WASD — bouger · Souris — regarder · Espace — sauter<br/>
-          Clic gauche (maintenir) — miner · Clic droit — poser / établi<br/>
+          Clic gauche (maintenir) — miner · Clic droit — poser l’objet en main<br/>
           E — inventaire · N — créatif · K — sauver · F3 — debug
         </div>
       </div>

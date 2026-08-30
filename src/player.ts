@@ -97,7 +97,6 @@ export class Player {
     this.particles = particles;
     scene.add(this.camera);
     this.held = new HeldItem(camera);
-    this.held.setItem(this.handItemId());
 
     const geo = new THREE.EdgesGeometry(new THREE.BoxGeometry(1.002, 1.002, 1.002));
     this.highlight = new THREE.LineSegments(
@@ -198,6 +197,9 @@ export class Player {
     if (!v) {
       this.lmb = false;
       this.resetMine();
+      this.held.hide();
+    } else {
+      this.held.setItem(this.handItemId());
     }
   }
 
