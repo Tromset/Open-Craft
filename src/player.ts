@@ -10,6 +10,7 @@ import {
   blockDrop,
 } from "./blocks";
 import { World, WORLD_HEIGHT, CHUNK_SIZE } from "./world";
+import { HeldItem } from "./heldItem";
 import type { Inventory } from "./inventory";
 import type { AudioEngine } from "./audio";
 import type { BreakParticles } from "./particles";
@@ -56,6 +57,7 @@ export class Player {
   private audio: AudioEngine;
   private particles: BreakParticles;
   private locked = false;
+  private held: HeldItem;
   private highlight: THREE.LineSegments;
   private crack: THREE.Mesh;
   private lmb = false;
@@ -93,6 +95,9 @@ export class Player {
     this.inv = inv;
     this.audio = audio;
     this.particles = particles;
+    scene.add(this.camera);
+    this.held = new HeldItem(camera);
+    this.held.setItem(this.handItemId());
 
     const geo = new THREE.EdgesGeometry(new THREE.BoxGeometry(1.002, 1.002, 1.002));
     this.highlight = new THREE.LineSegments(
@@ -494,6 +499,9 @@ export class Player {
     this.updateRaycast();
     this.updateMining(dt);
     this.world.updateAround(this.position.x, this.position.z);
+    const walking = wish.lengthSq() > 0 && this.onGround && !this.flying;
+    this.held.setItem(this.handItemId());
+    this.held.update(dt, walking);
   }
 
   private updateRaycast(): void {
@@ -639,9 +647,16 @@ export class Player {
     if (!this.creative && !this.inv.consumeSelected(1)) return;
     this.world.setBlock(x, y, z, held.id);
     this.audio.place();
+    this.held.setItem(this.handItemId());
+  }
+
+  /** Block currently in the selected hotbar slot, or null if empty. */
+  handItemId(): number | null {
+    const stack = this.inv.getSelected();
+    return stack && stack.count > 0 ? stack.id : null;
   }
 
   getSelectedBlock(): number {
-    return this.inv.selectedId();
+    return this.handItemId() ?? 0;
   }
 }

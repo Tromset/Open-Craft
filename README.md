@@ -41,6 +41,8 @@ Le jeu démarre en **survie** : 20 cœurs, 20 faim, barres d’air sous l’eau,
 | Sauvegarder | K (autosave 60 s) |
 | Pause | Échap (relâche le pointer lock) |
 
+L’objet du slot hotbar sélectionné est visible en main ; clic droit le pose (sauf sur un établi).
+
 ## Craft
 
 - 1 bois → 4 planches
