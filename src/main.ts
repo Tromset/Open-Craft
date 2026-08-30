@@ -1,99 +1,192 @@
 import "./style.css";
 import * as THREE from "three";
-import { World } from "./world";
+import { World, RENDER_DISTANCE, CHUNK_SIZE } from "./world";
 import { Player } from "./player";
-import { BLOCK_NAMES, HOTBAR } from "./blocks";
-import { createHotbarIcon } from "./textures";
+import { BLOCK_NAMES } from "./blocks";
+import { Inventory } from "./inventory";
+import { AudioEngine } from "./audio";
+import { BreakParticles } from "./particles";
+import { GameTime } from "./time";
+import { loadSave, writeSave, parseSeedParam, type SaveData } from "./save";
+import { Hud } from "./hud";
+import { ZombieHorde } from "./entities";
+
+const TORCH_LIGHTS = 16;
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
-
-app.innerHTML = `
-  <div id="overlay">
-    <h1>MINECRAFT</h1>
-    <p>Clique pour jouer</p>
-    <div class="hint">
-      ZQSD / WASD — bouger · Souris — regarder · Espace — sauter<br/>
-      Clic gauche — casser · Clic droit — poser · 1–9 / molette — inventaire<br/>
-      Shift — sprint
-    </div>
-  </div>
-  <div id="crosshair"></div>
-  <div id="hotbar"></div>
-  <div id="info"></div>
-`;
-
-const overlay = document.querySelector<HTMLDivElement>("#overlay")!;
-const crosshair = document.querySelector<HTMLDivElement>("#crosshair")!;
-const hotbarEl = document.querySelector<HTMLDivElement>("#hotbar")!;
-const infoEl = document.querySelector<HTMLDivElement>("#info")!;
-
-HOTBAR.forEach((block, i) => {
-  const slot = document.createElement("div");
-  slot.className = "slot" + (i === 0 ? " selected" : "");
-  slot.dataset.index = String(i);
-  const icon = createHotbarIcon(block);
-  slot.appendChild(icon);
-  const key = document.createElement("span");
-  key.className = "key";
-  key.textContent = String(i + 1);
-  slot.appendChild(key);
-  hotbarEl.appendChild(slot);
-});
+const hud = new Hud(app);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
-scene.fog = new THREE.Fog(0x87ceeb, 48, 96);
+const fogFar = RENDER_DISTANCE * CHUNK_SIZE * 1.15;
+scene.fog = new THREE.Fog(0x87ceeb, fogFar * 0.45, fogFar);
 
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 200);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 280);
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.setClearColor(0x87ceeb, 1);
-app.insertBefore(renderer.domElement, overlay);
+app.insertBefore(renderer.domElement, hud.overlay);
 
 const sun = new THREE.DirectionalLight(0xfff5e0, 1.35);
 sun.position.set(60, 100, 40);
 scene.add(sun);
-scene.add(new THREE.AmbientLight(0x8ec8ff, 0.55));
-scene.add(new THREE.HemisphereLight(0x87ceeb, 0x5a8a3a, 0.35));
+const ambient = new THREE.AmbientLight(0x8ec8ff, 0.55);
+scene.add(ambient);
+const hemi = new THREE.HemisphereLight(0x87ceeb, 0x5a8a3a, 0.35);
+scene.add(hemi);
 
-const world = new World(scene, 1337);
-const player = new Player(world, camera, scene);
+const torchPool: THREE.PointLight[] = [];
+for (let i = 0; i < TORCH_LIGHTS; i++) {
+  const l = new THREE.PointLight(0xffb040, 0, 10, 2);
+  scene.add(l);
+  torchPool.push(l);
+}
 
-overlay.querySelector("p")!.textContent = "Génération du monde…";
+const saved = loadSave();
+const seedParam = parseSeedParam();
+let seed = 1337;
+if (seedParam !== null) seed = seedParam >>> 0 || seedParam;
+else if (saved) seed = saved.seed;
+
+const world = new World(scene, seed);
+const inv = new Inventory();
+const audio = new AudioEngine();
+const particles = new BreakParticles(scene);
+const player = new Player(world, camera, scene, inv, audio, particles);
+const clock = new GameTime();
+const zombies = new ZombieHorde();
+
+const applySave = saved && (seedParam === null || saved.seed === seed);
+if (applySave && saved) {
+  world.importEdits(saved.edits);
+  inv.load(saved.inventory);
+  player.health = saved.health;
+  player.hunger = saved.hunger;
+  player.air = saved.air;
+  player.yaw = saved.yaw;
+  player.pitch = saved.pitch;
+  player.creative = saved.creative;
+  player.flying = saved.flying;
+  clock.elapsed = saved.time;
+}
+
+function persist(): boolean {
+  const data: SaveData = {
+    v: 1,
+    seed: world.seed,
+    x: player.position.x,
+    y: player.position.y,
+    z: player.position.z,
+    yaw: player.yaw,
+    pitch: player.pitch,
+    health: player.health,
+    hunger: player.hunger,
+    air: player.air,
+    inventory: inv.serialize(),
+    edits: world.exportEdits(),
+    time: clock.elapsed,
+    creative: player.creative,
+    flying: player.flying,
+  };
+  return writeSave(data);
+}
+
+hud.overlay.querySelector("p")!.textContent = "Génération du monde…";
 requestAnimationFrame(() => {
-  world.updateAround(8, 8);
-  player.spawn();
-  overlay.querySelector("p")!.textContent = "Clique pour jouer";
+  const px = applySave && saved ? saved.x : 8;
+  const pz = applySave && saved ? saved.z : 8;
+  world.updateAround(px, pz, 200, 200);
+  if (applySave && saved) {
+    player.position.set(saved.x, saved.y, saved.z);
+    player.spawnX = saved.x;
+    player.spawnY = saved.y;
+    player.spawnZ = saved.z;
+    player.yaw = saved.yaw;
+    player.pitch = saved.pitch;
+    player.syncCamera();
+  } else {
+    player.spawn();
+  }
+  hud.overlay.querySelector("p")!.textContent = "Clique pour jouer";
 });
 
-function setPlaying(playing: boolean): void {
-  if (playing) {
-    overlay.classList.add("hidden");
-    crosshair.classList.add("visible");
-    hotbarEl.classList.add("visible");
-    infoEl.classList.add("visible");
-    player.setLocked(true);
-  } else {
-    overlay.classList.remove("hidden");
-    crosshair.classList.remove("visible");
-    hotbarEl.classList.remove("visible");
-    infoEl.classList.remove("visible");
-    player.setLocked(false);
+type Screen = "pause" | "play" | "inventory" | "dead";
+let screen: Screen = "pause";
+
+function enterPlay(): void {
+  screen = "play";
+  hud.setPlaying(true);
+  hud.death.classList.add("hidden");
+  player.setLocked(true);
+  audio.resume();
+}
+
+function pauseGame(): void {
+  if (screen === "inventory") {
+    hud.closeInventory(inv);
+  }
+  screen = player.dead ? "dead" : "pause";
+  player.setLocked(false);
+  hud.setPlaying(false);
+  if (player.dead) {
+    hud.death.classList.remove("hidden");
+    hud.overlay.classList.add("hidden");
   }
 }
 
-overlay.addEventListener("click", async () => {
+function openInv(size: number): void {
+  screen = "inventory";
+  player.setLocked(false);
+  if (document.pointerLockElement) document.exitPointerLock();
+  hud.setPlaying(false);
+  hud.overlay.classList.add("hidden");
+  hud.hotbar.classList.add("visible");
+  document.getElementById("status")!.classList.add("visible");
+  hud.openInventory(inv, audio, size);
+}
+
+player.onOpenCraft = () => openInv(3);
+player.onDeath = () => {
+  screen = "dead";
+  player.setLocked(false);
+  if (document.pointerLockElement) document.exitPointerLock();
+  hud.setPlaying(false);
+  hud.overlay.classList.add("hidden");
+  hud.death.classList.remove("hidden");
+};
+player.onToggleCreative = () => {
+  hud.showToast(player.creative ? "Mode créatif" : "Mode survie");
+};
+
+hud.overlay.addEventListener("click", async () => {
+  if (player.dead) return;
   try {
     await renderer.domElement.requestPointerLock();
   } catch {
-    setPlaying(true);
+    enterPlay();
+    return;
+  }
+  window.setTimeout(() => {
+    if (screen === "pause" && !player.dead) enterPlay();
+  }, 120);
+});
+
+hud.death.addEventListener("click", async () => {
+  player.respawn();
+  hud.death.classList.add("hidden");
+  try {
+    await renderer.domElement.requestPointerLock();
+  } catch {
+    enterPlay();
   }
 });
 
 document.addEventListener("pointerlockchange", () => {
-  setPlaying(document.pointerLockElement === renderer.domElement);
+  const locked = document.pointerLockElement === renderer.domElement;
+  if (locked) enterPlay();
+  else if (screen === "play") pauseGame();
 });
 
 window.addEventListener("resize", () => {
@@ -102,15 +195,61 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+window.addEventListener("mousemove", (e) => hud.trackMouse(e));
+
+window.addEventListener("keydown", (e) => {
+  if (e.code === "KeyE") {
+    e.preventDefault();
+    if (screen === "inventory") {
+      hud.closeInventory(inv);
+      screen = "pause";
+      hud.setPlaying(false);
+      void renderer.domElement.requestPointerLock();
+    } else if (screen === "play" || screen === "pause") {
+      openInv(2);
+    }
+  }
+  if (e.code === "Escape" && screen === "inventory") {
+    hud.closeInventory(inv);
+    pauseGame();
+  }
+  if (e.code === "KeyK") {
+    const ok = persist();
+    hud.showToast(ok ? "Sauvegardé" : "Échec de la sauvegarde");
+    audio.ui();
+  }
+  if (e.code === "F3") {
+    e.preventDefault();
+    hud.f3 = !hud.f3;
+    hud.info.classList.toggle("visible", hud.f3 && screen === "play");
+  }
+});
+
+window.addEventListener("beforeunload", () => persist());
+
 let last = performance.now();
 let frames = 0;
 let fps = 0;
 let fpsTimer = 0;
+let autoSave = 0;
 
-function updateHotbar(): void {
-  hotbarEl.querySelectorAll(".slot").forEach((el, i) => {
-    el.classList.toggle("selected", i === player.selected);
-  });
+function updateTorches(): void {
+  const near = world.nearestTorches(
+    player.position.x,
+    player.position.y + 1.6,
+    player.position.z,
+    TORCH_LIGHTS,
+  );
+  for (let i = 0; i < TORCH_LIGHTS; i++) {
+    const l = torchPool[i];
+    if (i < near.length) {
+      l.position.set(near[i][0] + 0.5, near[i][1] + 0.7, near[i][2] + 0.5);
+      l.intensity = 1.15;
+      l.distance = 11;
+    } else {
+      l.intensity = 0;
+    }
+  }
 }
 
 function loop(now: number): void {
@@ -124,15 +263,42 @@ function loop(now: number): void {
     fpsTimer = 0;
   }
 
-  if (document.pointerLockElement === renderer.domElement) {
+  if (screen === "play" && !player.dead) {
     player.update(dt);
+    clock.update(dt);
+    particles.update(dt);
+    zombies.update(dt, scene, world, player, audio, clock.isNight());
+    autoSave += dt;
+    if (autoSave >= 60) {
+      autoSave = 0;
+      persist();
+    }
   } else {
     world.updateAround(player.position.x, player.position.z);
+    particles.update(dt);
   }
 
-  updateHotbar();
-  const b = player.getSelectedBlock();
-  infoEl.textContent = `${fps} FPS\nXYZ ${player.position.x.toFixed(1)} ${player.position.y.toFixed(1)} ${player.position.z.toFixed(1)}\n${BLOCK_NAMES[b] ?? ""}`;
+  clock.apply(scene, sun, ambient, hemi, scene.fog as THREE.Fog);
+  updateTorches();
+  hud.updateHotbar(inv, player.selected);
+  hud.updateVitals(
+    player.health,
+    player.hunger,
+    player.air,
+    player.headUnderwater(),
+    player.creative,
+  );
+  hud.setMine(player.mineProgress);
+
+  if (hud.f3) {
+    const b = player.getSelectedBlock();
+    const biome = world.biomeLabel(player.position.x, player.position.z);
+    hud.info.textContent =
+      `${fps} FPS\nXYZ ${player.position.x.toFixed(1)} ${player.position.y.toFixed(1)} ${player.position.z.toFixed(1)}\n` +
+      `Biome ${biome}\nHeure ${clock.debugLabel()}\n` +
+      `${player.creative ? "Créatif" : "Survie"}${player.flying ? " (vol)" : ""}\n` +
+      `${BLOCK_NAMES[b] ?? ""}\nSeed ${world.seed}`;
+  }
 
   renderer.render(scene, camera);
   requestAnimationFrame(loop);
