@@ -165,7 +165,16 @@ export class Player {
 
     window.addEventListener("mousedown", (e) => {
       if (!this.locked || this.dead) return;
-      if (e.button === 0) this.lmb = true;
+      if (e.button === 0) {
+        this.lmb = true;
+        if (this.creative) {
+          this.updateRaycast();
+          if (this.target) {
+            const id = this.world.getBlock(this.target.x, this.target.y, this.target.z);
+            this.breakAt(this.target.x, this.target.y, this.target.z, id);
+          }
+        }
+      }
       if (e.button === 2) this.tryUse();
     });
     window.addEventListener("mouseup", (e) => {
